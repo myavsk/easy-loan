@@ -1,210 +1,177 @@
 <?php
-/**
- * Configuration & Database Helper Functions
- * Easy Loan System - Advanced QR Management
- */
+require_once __DIR__ . '/config.php';
 
 session_start();
 
-// Configuration Constants
 define('DEFAULT_PASSWORD', 'admin@123');
 define('DATA_FILE', __DIR__ . '/data.json');
-define('QR_IMAGES_DIR', __DIR__ . '/qr_codes');
+define('QR_DIR', __DIR__ . '/qr_codes');
 define('SESSION_TIMEOUT', 3600);
-define('QR_IMAGES_URL', 'qr_codes/');
 
-// Ensure QR images directory exists
-if (!is_dir(QR_IMAGES_DIR)) {
-    @mkdir(QR_IMAGES_DIR, 0755, true);
+if (!is_dir(QR_DIR)) {
+    @mkdir(QR_DIR, 0755, true);
 }
 
-/**
- * Load data from JSON file
- */
-function loadData() {
+function loadData()
+{
     if (!file_exists(DATA_FILE)) {
-        $default_data = array(
+        $default = [
             'portal_url' => 'https://loanportal.example.com',
-            'qr_codes' => array(),
-            'agents' => array(),
-            'applications' => array()
-        );
-        saveData($default_data);
-        return $default_data;
+            'agents' => [],
+            'qr_codes' => [],
+            'applications' => []
+        ];
+        saveData($default);
+        return $default;
     }
-    
-    $json = file_get_contents(DATA_FILE);
+
+    $json = @file_get_contents(DATA_FILE);
     $data = json_decode($json, true);
-    
-    // Validate structure
-    if (!isset($data['portal_url'])) $data['portal_url'] = 'https://loanportal.example.com';
-    if (!isset($data['qr_codes'])) $data['qr_codes'] = array();
-    if (!isset($data['agents'])) $data['agents'] = array();
-    if (!isset($data['applications'])) $data['applications'] = array();
-    
+
+    if (!is_array($data)) {
+        $data = [
+            'portal_url' => 'https://loanportal.example.com',
+            'agents' => [],
+            'qr_codes' => [],
+            'applications' => []
+        ];
+    }
+
+    $data['portal_url'] = $data['portal_url'] ?? 'https://loanportal.example.com';
+    $data['agents'] = $data['agents'] ?? [];
+    $data['qr_codes'] = $data['qr_codes'] ?? [];
+    $data['applications'] = $data['applications'] ?? [];
+
     return $data;
 }
 
-/**
- * Save data to JSON file
- */
-function saveData($data) {
+function saveData($data)
+{
     $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-    if (file_put_contents(DATA_FILE, $json, LOCK_EX) === false) {
-        return false;
-    }
-    return true;
+    return file_put_contents(DATA_FILE, $json, LOCK_EX) !== false;
 }
 
-/**
- * Check if user is logged in
- */
-function isLoggedIn() {
+function isLoggedIn()
+{
     if (!isset($_SESSION['admin_login'])) {
         return false;
     }
+
     if (time() - $_SESSION['login_time'] > SESSION_TIMEOUT) {
         unset($_SESSION['admin_login']);
         unset($_SESSION['login_time']);
         return false;
     }
+
     $_SESSION['login_time'] = time();
     return true;
 }
 
-/**
- * Generate QR code image using external API
- */
-function generateQRImage($text, $filename) {
-    $url = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' . urlencode($text);
-    
-    $image_data = @file_get_contents($url);
-    if ($image_data === false) {
-        return false;
-    }
-    
-    $file_path = QR_IMAGES_DIR . '/' . $filename . '.png';
-    if (file_put_contents($file_path, $image_data) === false) {
-        return false;
-    }
-    
-    return $file_path;
+function sanitize($value)
+{
+    return htmlspecialchars(trim((string)$value), ENT_QUOTES, 'UTF-8');
 }
 
-/**
- * Generate random unique code
- */
-function generateRandomCode($prefix = 'QR') {
-    return $prefix . '_' . strtoupper(bin2hex(random_bytes(8)));
-}
-
-/**
- * Get base URL
- */
-function getBaseUrl() {
+function getBaseUrl()
+{
     $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
-    $base_url = $protocol . $_SERVER['HTTP_HOST'] . dirname($_SERVER['PHP_SELF']);
-    if (substr($base_url, -1) !== '/') {
-        $base_url .= '/';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $path = dirname($_SERVER['PHP_SELF']);
+
+    if ($path === '/' || $path === '\\') {
+        $path = '';
     }
-    return $base_url;
+
+    $base = $protocol . $host . $path . '/';
+    return $base;
 }
 
-/**
- * Find QR code by code
- */
-function findQRByCode($qr_code, $data) {
+function isValidUrl($url)
+{
+    return filter_var($url, FILTER_VALIDATE_URL) !== false;
+}
+
+function isValidPhone($phone)
+{
+    $digits = preg_replace('/\D+/', '', $phone ?? '');
+    return strlen($digits) === 10;
+}
+
+function findAgentByCode($code, $data)
+{
+    foreach ($data['agents'] as $agent) {
+        if (($agent['code'] ?? '') === $code) {
+            return $agent;
+        }
+    }
+    return null;
+}
+
+function findQRByCode($code, $data)
+{
     foreach ($data['qr_codes'] as $qr) {
-        if ($qr['code'] === $qr_code) {
+        if (($qr['code'] ?? '') === $code) {
             return $qr;
         }
     }
     return null;
 }
 
-/**
- * Find agent by code
- */
-function findAgentByCode($agent_code, $data) {
-    foreach ($data['agents'] as $agent) {
-        if ($agent['code'] === $agent_code) {
-            return $agent;
-        }
-    }
-    return null;
-}
+function generateQRImage($text, $file_name)
+{
+    $url = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' . urlencode($text);
+    $imageData = @file_get_contents($url);
 
-/**
- * Find agent by name
- */
-function findAgentByName($agent_name, $data) {
-    foreach ($data['agents'] as $agent) {
-        if ($agent['name'] === $agent_name) {
-            return $agent;
-        }
-    }
-    return null;
-}
-
-/**
- * Check if file exists
- */
-function getQRImageFile($filename) {
-    $file_path = QR_IMAGES_DIR . '/' . $filename . '.png';
-    return file_exists($file_path) ? $file_path : null;
-}
-
-/**
- * Create ZIP file from QR images
- */
-function createQRZip($qr_codes) {
-    $zip_file = tempnam(sys_get_temp_dir(), 'qr_');
-    $zip = new ZipArchive();
-    
-    if ($zip->open($zip_file, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+    if ($imageData === false) {
         return false;
     }
-    
-    foreach ($qr_codes as $qr) {
-        $image_file = getQRImageFile($qr['code']);
-        if ($image_file && file_exists($image_file)) {
-            $zip->addFile($image_file, $qr['code'] . '.png');
+
+    $path = QR_DIR . '/' . $file_name . '.png';
+    if (file_put_contents($path, $imageData) === false) {
+        return false;
+    }
+
+    return $path;
+}
+
+function getQRImagePath($code)
+{
+    $path = QR_DIR . '/' . $code . '.png';
+    return file_exists($path) ? $path : null;
+}
+
+function createQRZip($qrCodes)
+{
+    if (!class_exists('ZipArchive')) {
+        return false;
+    }
+
+    $zipPath = tempnam(sys_get_temp_dir(), 'easyloan_qr_') . '.zip';
+    $zip = new ZipArchive();
+
+    if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+        return false;
+    }
+
+    foreach ($qrCodes as $qr) {
+        $code = $qr['code'] ?? null;
+        if (!$code) {
+            continue;
+        }
+
+        $imagePath = getQRImagePath($code);
+        if ($imagePath && file_exists($imagePath)) {
+            $zip->addFile($imagePath, $code . '.png');
         }
     }
-    
+
     $zip->close();
-    return $zip_file;
+    return $zipPath;
 }
 
-/**
- * Sanitize input
- */
-function sanitize($input) {
-    return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
+function logApplication($data)
+{
+    $entry = json_encode($data, JSON_UNESCAPED_SLASHES) . PHP_EOL;
+    @file_put_contents(__DIR__ . '/applications.log', $entry, FILE_APPEND | LOCK_EX);
 }
-
-/**
- * Validate URL
- */
-function isValidUrl($url) {
-    return filter_var($url, FILTER_VALIDATE_URL) !== false;
-}
-
-/**
- * Validate phone number
- */
-function isValidPhone($phone) {
-    $phone = preg_replace('/[^0-9]/', '', $phone);
-    return strlen($phone) === 10;
-}
-
-/**
- * Log application submission
- */
-function logApplication($data) {
-    $log_file = __DIR__ . '/applications.log';
-    $log_entry = json_encode($data) . "\n";
-    file_put_contents($log_file, $log_entry, FILE_APPEND | LOCK_EX);
-}
-
 ?>

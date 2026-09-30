@@ -1,0 +1,6 @@
+qr_codes/
+applications.log
+data.json
+.DS_Store
+Thumbs.db
+*.log
